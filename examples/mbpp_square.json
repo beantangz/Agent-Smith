@@ -1,0 +1,11 @@
+{
+  "task_id": 1,
+  "task_definition": "Write a function that returns the square of an integer.",
+  "function_definition": "def square(number):",
+  "test_imports": [],
+  "test_list": [
+    "assert square(4) == 16",
+    "assert square(-3) == 9",
+    "assert square(0) == 0"
+  ]
+}
