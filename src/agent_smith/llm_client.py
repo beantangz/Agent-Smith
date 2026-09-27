@@ -14,14 +14,14 @@ class LLMResponse(BaseModel):
     model_name: str
     retries: int = 0
 
-
+# class abstraite dont va heriter chaque LLM et devrai implementer generate()
 class LLMClient(ABC):
     #Common interface implemented by every LLM provider
 
     @abstractmethod
     def generate(
         self,
-        system_prompt: str,
-        user_prompt: str,
+        system_prompt: str, # regles : tu es un agent, blablabla, Cadrage general
+        user_prompt: str, # probleme specifique a resoudre
     ) -> LLMResponse:
-        #Send prompts to an LLM and return a normalized response.
+        """Send prompts to an LLM and return a normalized response."""
