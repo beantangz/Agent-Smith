@@ -1,0 +1,25 @@
+Diff entre multiprocessing et subprocess : (pour lances des sous processus)
+
+multiprocessing execute dans un processus enfant une fonction python particulier avec ses arguments specifiques qu'on lui indique 
+(utilise dans la sandbox)
+Communique avec la Sandbox avec Queue
+
+subprocess execute dans un processus enfant un programme ou une commande qu'on lui fournit sous forme de chaine de caractere
+(utilise dans le serveur MBP )
+Communique avec stdin, stdout, stderr avec le serveur MBP
+
+
+
+
+Fonctionnement Sandbox et client/serveur MCP :
+
+Le client MCP est un objet present dans la Sandbox, elle contient une reference vers lui dans sa definition
+Au demarrage de l'agent, le client creer le serveur dans un processus separer et creer un flux de communication.
+Le serveur expose ses tools (fonctions) au client (et donc a la sandbox), le serveur execute ces tools dans un processus enfant a chacun de leurs appels.
+et retourne le resultat au client. Le processus du serveur est creer au debut et reste vivant durant tout le cycle de l'agent
+
+
+
+Run test Wrapper ????????????
+
+Pourquoi ne pas faire des threads ??????????
