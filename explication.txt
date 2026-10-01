@@ -18,6 +18,17 @@ Au demarrage de l'agent, le client creer le serveur dans un processus separer et
 Le serveur expose ses tools (fonctions) au client (et donc a la sandbox), le serveur execute ces tools dans un processus enfant a chacun de leurs appels.
 et retourne le resultat au client. Le processus du serveur est creer au debut et reste vivant durant tout le cycle de l'agent
 
+La sandbox1 creer un process enfant2 pour executer le code du LLM,
+A chaque appel a un tool, le process enfant2 de la sandbox fait remonter une demande a la sandbox1,
+la sandbox demande a son client d'envoyer une requete au serveur3 MCP, le serveur3 (process separer) exec ses tools dans un process enfant4,
+Retoune le resultat a la sandbox1, qui retourne le resultat a son process enfant2 (executant le code du LLM).
+Une fois que l'enfant2 a fini il fait remonter final_answer a la sandbox1 
+
+Flux :
+Demande : 2 → 1 → 3 → 4
+Résultat : 4 → 3 → 1 → 2
+
+
 
 
 Run test Wrapper ????????????
