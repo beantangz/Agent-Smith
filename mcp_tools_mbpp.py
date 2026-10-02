@@ -1,6 +1,8 @@
 import os
 import subprocess
 import sys
+import json
+import re
 
 from mcp.server import MCPServer
 
@@ -45,25 +47,52 @@ def _build_test_script(
         "print(f'Summary: {passed}/{len(tests)} tests passed')\n"
     )
 
+def _make_result(
+    passed: bool,
+    passed_tests: int = 0,
+    total_tests: int = 0,
+    stdout: str = "",
+    stderr: str = "",
+    error: str | None = None,
+    timed_out: bool = False,
+) -> str:
+    """Serialize a normalized test result as JSON."""
+
+    return json.dumps(
+        {
+            "passed": passed,
+            "passed_tests": passed_tests,
+            "total_tests": total_tests,
+            "stdout": stdout,
+            "stderr": stderr,
+            "error": error,
+            "timed_out": timed_out,
+        },
+        indent=2,
+    )
+
 
 #on execute le code dans un nvx process pour pas faire crash le serveur MCP
-def _run_tests_impl(solution: str) -> str: 
+
+def _run_tests_impl(solution: str) -> str:
     """Execute a candidate solution against the current task."""
-# on commence par load la tache, avec les imports et les tests
+
     task_path = os.getenv("MBPP_TASK_FILE")
 
     if task_path is None:
-        return (
-            "Configuration error: "
-            "MBPP_TASK_FILE is not defined"
+        return _make_result(
+            passed=False,
+            error="MBPP_TASK_FILE is not defined",
         )
 
     try:
         task = load_mbpp_task(task_path)
     except TaskLoadingError as error:
-        return f"Task loading failed: {error}"
-
-# on creer le script complet avec la solution du LLM, pour l'envoyer au sous process
+        return _make_result(
+            passed=False,
+            error=f"Task loading failed: {error}",
+        )
+# on creer le scprit de test avec les imports, le code solution et les tests en string pour le process (subprocess)
     test_script = _build_test_script(
         solution=solution,
         test_imports=task.test_imports,
@@ -71,12 +100,12 @@ def _run_tests_impl(solution: str) -> str:
     )
 
     try:
-        completed = subprocess.run( # nvx process
+        completed = subprocess.run(
             [
                 sys.executable,
                 "-I",
                 "-c",
-                test_script, # script complet avec solution et tests
+                test_script,
             ],
             capture_output=True,
             text=True,
@@ -84,20 +113,52 @@ def _run_tests_impl(solution: str) -> str:
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return "Test execution timed out after 10 seconds"
+        return _make_result(
+            passed=False,
+            total_tests=len(task.test_list),
+            error="Test execution timed out after 10 seconds",
+            timed_out=True,
+        )
 
     stdout = completed.stdout.strip()
     stderr = completed.stderr.strip()
 
-    if stderr:
-        if stdout:
-            stdout += "\n"
-        stdout += f"Execution error:\n{stderr}"
+    summary_matches = re.findall(
+        r"Summary: (\d+)/(\d+) tests passed",
+        stdout,
+    )
 
-    if not stdout:
-        return "Test execution produced no output"
+    if not summary_matches:
+        return _make_result(
+            passed=False,
+            total_tests=len(task.test_list),
+            stdout=stdout,
+            stderr=stderr,
+            error=(
+                "The test process ended without producing "
+                "a valid test summary"
+            ),
+        )
 
-    return stdout
+    passed_count, total_count = summary_matches[-1]
+
+    passed_tests = int(passed_count)
+    total_tests = int(total_count)
+
+    all_tests_passed = (
+        completed.returncode == 0
+        and passed_tests == total_tests
+        and total_tests == len(task.test_list)
+    )
+
+    return _make_result(
+        passed=all_tests_passed,
+        passed_tests=passed_tests,
+        total_tests=total_tests,
+        stdout=stdout,
+        stderr=stderr,
+        error=None if all_tests_passed else "Some tests failed",
+    )
 
 
 @mcp.tool()

@@ -1,0 +1,14 @@
+{
+  "task_id": 3,
+  "task_definition": "Write a function that returns True when an integer is prime and False otherwise.",
+  "function_definition": "def is_prime(number):",
+  "test_imports": [],
+  "test_list": [
+    "assert is_prime(2) is True",
+    "assert is_prime(17) is True",
+    "assert is_prime(1) is False",
+    "assert is_prime(0) is False",
+    "assert is_prime(-7) is False",
+    "assert is_prime(15) is False"
+  ]
+}

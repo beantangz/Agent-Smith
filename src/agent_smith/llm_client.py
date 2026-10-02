@@ -23,5 +23,6 @@ class LLMClient(ABC):
         self,
         system_prompt: str, # regles : tu es un agent, blablabla, Cadrage general
         user_prompt: str, # probleme specifique a resoudre
+        max_output_tokens: int | None = None,
     ) -> LLMResponse:
         """Send prompts to an LLM and return a normalized response."""

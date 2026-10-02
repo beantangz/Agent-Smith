@@ -28,6 +28,7 @@ class OpenAICompatibleClient(LLMClient):
         self,
         system_prompt: str,
         user_prompt: str,
+        max_output_tokens: int | None = None,
     ) -> LLMResponse:
         start_time = time.monotonic()
 
@@ -44,6 +45,13 @@ class OpenAICompatibleClient(LLMClient):
                 },
             ],
         }
+        if max_output_tokens is not None:
+            if max_output_tokens <= 0:
+                raise LLMClientError(
+                    "max_output_tokens must be greater than zero"
+                )
+
+            request_body["max_completion_tokens"] = max_output_tokens
 
         headers = {
             "Authorization": f"Bearer {self.api_key}", # cles d'API pour authentification, privee

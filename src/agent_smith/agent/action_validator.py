@@ -1,5 +1,8 @@
 import ast
-
+# va verifier la structure du code produit par l'agent, pour s'assurer qu'il suit le protocole attendu :
+# solution doit etre une str, et doit etre assigné a une variable nommée solution, puis faire :
+# run_tests(solution) ou final_answer(solution)
+# sinon -> Error
 
 class ActionValidationError(Exception):
     """Raised when an agent action does not follow the protocol."""

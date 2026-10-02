@@ -1,0 +1,12 @@
+{
+  "task_id": 2,
+  "task_definition": "Write a function that returns a string reversed.",
+  "function_definition": "def reverse_string(text):",
+  "test_imports": [],
+  "test_list": [
+    "assert reverse_string('hello') == 'olleh'",
+    "assert reverse_string('') == ''",
+    "assert reverse_string('a') == 'a'",
+    "assert reverse_string('Python') == 'nohtyP'"
+  ]
+}

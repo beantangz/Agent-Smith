@@ -1,11 +1,15 @@
+# Fichier principale de l'agent MBPP avec la boucle principale Thought-Code-Observation et mise a jour des steps et prompts
+# a chaque iteration.
+
 import asyncio
 import time
+import json
 
 from agent_smith.code_extractor import (
     CodeExtractionError,
     extract_python_code,
 )
-from agent_smith.action_validator import (
+from agent_smith.agent.action_validator import (
     ActionValidationError,
     validate_agent_action,
 )
@@ -69,12 +73,26 @@ class MBPPAgent:
                     error="Agent execution timed out",
                 )
 
+            remaining_output_tokens = (self.max_output_tokens - total_output_tokens)
+
+            if remaining_output_tokens <= 0:
+                return self._build_failure_result(
+                    task=task,
+                    steps=steps,
+                    total_requests=total_requests,
+                    total_input_tokens=total_input_tokens,
+                    total_output_tokens=total_output_tokens,
+                    start_time=start_time,
+                    error="Maximum output token budget exceeded",
+                )
+
             try:
                 response = await asyncio.wait_for(
-                    asyncio.to_thread( # run la fonction generate() (synchrone) dans un thread pour ne pas bloquer
-                        self.llm_client.generate,
+                    asyncio.to_thread( 
+                        self.llm_client.generate, # lance fonction generate()(synchrone) dans un thread pour ne pas bloquer
                         MBPP_SYSTEM_PROMPT,
                         user_prompt,
+                        remaining_output_tokens,
                     ),
                     timeout=remaining_time,
                 )
@@ -201,7 +219,7 @@ class MBPPAgent:
                     "\"\"\"\n"
                     "final_answer(solution)"
                 )
-                steps.append(
+                steps.append( # si erreur -> on ajoute un step avec l'erreur et on relance le LLM pour qu'il corrige
                     StepMetrics(
                         step=iteration,
                         input_tokens=response.input_tokens,
@@ -248,6 +266,7 @@ class MBPPAgent:
                 stderr=sandbox_result.stderr,
                 error=sandbox_result.error,
                 timed_out=sandbox_result.timed_out,
+                tool_output=sandbox_result.tool_output,
             )
 
             steps.append(
@@ -265,18 +284,119 @@ class MBPPAgent:
                 )
             )
 
-            if sandbox_result.final_answer is not None: # tache terminee ?
-                return self._build_result(
-                    task=task,
-                    success=True,
-                    solution=sandbox_result.final_answer,
-                    steps=steps,
-                    total_requests=total_requests,
-                    total_input_tokens=total_input_tokens,
-                    total_output_tokens=total_output_tokens,
-                    start_time=start_time,
-                    error=None,
+            if sandbox_result.final_answer is not None: # si final answer, on verifie si la solution passe les tests
+                final_solution = sandbox_result.final_answer
+
+                elapsed_time = time.monotonic() - start_time
+                remaining_time = self.timeout_seconds - elapsed_time
+
+                if remaining_time <= 0:
+                    return self._build_result(
+                        task=task,
+                        success=False,
+                        solution="",
+                        steps=steps,
+                        total_requests=total_requests,
+                        total_input_tokens=total_input_tokens,
+                        total_output_tokens=total_output_tokens,
+                        start_time=start_time,
+                        error=(
+                            "Agent execution timed out before final "
+                            "answer verification"
+                        ),
+                    )
+
+                verification_code = (
+                    f"solution = {final_solution!r}\n"
+                    "observation = run_tests(solution)\n"
+                    "print(observation)\n"
                 )
+
+                try:
+                    verification_result = await asyncio.wait_for(
+                        self.sandbox.execute(verification_code),
+                        timeout=remaining_time,
+                    )
+                except asyncio.TimeoutError:
+                    return self._build_result(
+                        task=task,
+                        success=False,
+                        solution="",
+                        steps=steps,
+                        total_requests=total_requests,
+                        total_input_tokens=total_input_tokens,
+                        total_output_tokens=total_output_tokens,
+                        start_time=start_time,
+                        error="Final answer verification timed out",
+                    )
+
+                verification_observation = self._format_observation(
+                    stdout=verification_result.stdout,
+                    stderr=verification_result.stderr,
+                    error=verification_result.error,
+                    timed_out=verification_result.timed_out,
+                    tool_output=verification_result.tool_output,
+                )
+
+                steps[-1].sandbox_output += (
+                    "\n\nFinal answer verification:\n"
+                    f"{verification_observation}"
+                )
+
+                raw_test_result = (
+                verification_result.tool_output
+                or verification_result.stdout
+                )
+
+                test_result = self._parse_test_result(
+                    raw_test_result
+                )
+
+                if test_result is None:
+                    return self._build_result(
+                        task=task,
+                        success=False,
+                        solution="",
+                        steps=steps,
+                        total_requests=total_requests,
+                        total_input_tokens=total_input_tokens,
+                        total_output_tokens=total_output_tokens,
+                        start_time=start_time,
+                        error=(
+                            "Final answer verification returned an "
+                            "invalid test result"
+                        ),
+                    )
+
+                if test_result["passed"] is True:
+                    return self._build_result(
+                        task=task,
+                        success=True,
+                        solution=final_solution,
+                        steps=steps,
+                        total_requests=total_requests,
+                        total_input_tokens=total_input_tokens,
+                        total_output_tokens=total_output_tokens,
+                        start_time=start_time,
+                        error=None,
+                    )
+
+                rejected_observation = (
+                    "The final answer was rejected because it did not "
+                    "pass all tests.\n\n"
+                    f"Final verification result:\n"
+                    f"{verification_result.stdout}\n\n"
+                    "Correct the solution, call run_tests(solution), and "
+                    "only call final_answer(solution) after all tests pass."
+                )
+
+                user_prompt = self._add_observation(
+                    user_prompt=user_prompt,
+                    iteration=iteration,
+                    llm_output=response.content,
+                    observation=rejected_observation,
+                )
+                continue
 
             user_prompt = self._add_observation( # on relance une iteration avec nvx prompt
                 user_prompt=user_prompt,
@@ -298,10 +418,36 @@ class MBPPAgent:
         )
 
     @staticmethod
+    def _parse_test_result(
+        stdout: str,
+    ) -> dict[str, object] | None:
+        """Parse and validate a structured run_tests result."""
+
+        try:
+            result = json.loads(stdout.strip())
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+        if not isinstance(result, dict):
+            return None
+
+        if not isinstance(result.get("passed"), bool):
+            return None
+
+        if not isinstance(result.get("passed_tests"), int):
+            return None
+
+        if not isinstance(result.get("total_tests"), int):
+            return None
+
+        return result
+
+    @staticmethod
     def _format_observation(
         stdout: str,
         stderr: str,
         error: str | None,
+        tool_output: str | None,
         timed_out: bool,
     ) -> str:
         """Convert a sandbox result into text for the LLM."""
@@ -310,6 +456,7 @@ class MBPPAgent:
             f"stdout:\n{stdout or '<empty>'}\n\n"
             f"stderr:\n{stderr or '<empty>'}\n\n"
             f"error:\n{error or '<none>'}\n\n"
+            f"tool_output:\n{tool_output or '<empty>'}\n\n"
             f"timed_out: {timed_out}"
         )
 

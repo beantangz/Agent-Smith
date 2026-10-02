@@ -18,6 +18,7 @@ class SandboxResult(BaseModel):
     stderr: str = ""
     error: Optional[str] = None #Optional[str] -> peut etre str ou None
     final_answer: Optional[str] = None
+    tool_output: Optional[str] = None
     timed_out: bool = False
 
 
@@ -37,6 +38,7 @@ def _execute_in_child(
     stderr_buffer = io.StringIO()
     final_value: Optional[str] = None
     error_message: Optional[str] = None
+    last_tool_output: Optional[str] = None
 
 
 
@@ -54,6 +56,8 @@ def _execute_in_child(
 
 
     def run_tests(solution: str) -> str:
+        nonlocal last_tool_output
+
         if not isinstance(solution, str):
             raise TypeError(
                 "run_tests() expects the solution as a string"
@@ -72,8 +76,10 @@ def _execute_in_child(
 
         if response["error"] is not None:
             raise RuntimeError(response["error"])
+        
+        last_tool_output = response["result"]
 
-        return response["result"]
+        return last_tool_output
 
     namespace = {
         "final_answer": final_answer,
@@ -99,6 +105,7 @@ def _execute_in_child(
             "stderr": stderr_buffer.getvalue(),
             "error": error_message,
             "final_answer": final_value,
+            "tool_output": last_tool_output,
             "timed_out": False,
         }
     )
